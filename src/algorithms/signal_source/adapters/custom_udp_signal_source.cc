@@ -63,6 +63,8 @@ CustomUDPSignalSource::CustomUDPSignalSource(const ConfigurationInterface* confi
         item_size_,
         IQ_swap_);
 
+    throttle_ = gr::blocks::throttle::make(item_size_, 30690000);    
+
     if (channels_in_udp_ >= RF_channels_)
         {
             for (int n = 0; n < channels_in_udp_; n++)
@@ -100,7 +102,8 @@ void CustomUDPSignalSource::connect(gr::top_block_sptr top_block)
     // connect null sinks to unused streams
     for (int n = 0; n < channels_in_udp_; n++)
         {
-            top_block->connect(udp_gnss_rx_source_, n, null_sinks_.at(n), 0);
+            //top_block->connect(udp_gnss_rx_source_, n, null_sinks_.at(n), 0);
+            top_block->connect(udp_gnss_rx_source_, n, throttle_, 0);
         }
     DLOG(INFO) << "connected udp_source to null_sinks to enable the use of spare channels\n";
 
@@ -120,7 +123,8 @@ void CustomUDPSignalSource::disconnect(gr::top_block_sptr top_block)
     // disconnect null sinks to unused streams
     for (int n = 0; n < channels_in_udp_; n++)
         {
-            top_block->disconnect(udp_gnss_rx_source_, n, null_sinks_.at(n), 0);
+            //top_block->disconnect(udp_gnss_rx_source_, n, null_sinks_.at(n), 0);
+            top_block->disconnect(udp_gnss_rx_source_, n, throttle_, 0);
         }
     if (dump_)
         {
@@ -143,11 +147,13 @@ gr::basic_block_sptr CustomUDPSignalSource::get_left_block()
 
 gr::basic_block_sptr CustomUDPSignalSource::get_right_block()
 {
-    return udp_gnss_rx_source_;
+    //return udp_gnss_rx_source_;
+    return throttle_;
 }
 
 
 gr::basic_block_sptr CustomUDPSignalSource::get_right_block(__attribute__((unused)) int RF_channel)
 {
-    return udp_gnss_rx_source_;
+    //return udp_gnss_rx_source_;
+    return throttle_;
 }

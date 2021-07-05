@@ -23,6 +23,7 @@
 #include "signal_source_base.h"
 #include <gnuradio/blocks/file_sink.h>
 #include <gnuradio/blocks/null_sink.h>
+#include <gnuradio/blocks/throttle.h>
 #include <pmt/pmt.h>
 #include <stdexcept>
 #include <string>
@@ -77,6 +78,8 @@ private:
 
     bool dump_;
     bool IQ_swap_;
+
+    gr::blocks::throttle::sptr throttle_;
 };
 
 
