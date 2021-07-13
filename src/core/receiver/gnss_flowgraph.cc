@@ -160,6 +160,7 @@ void GNSSFlowgraph::init()
     mapStringValues_["1G"] = evGLO_1G;
     mapStringValues_["2G"] = evGLO_2G;
     mapStringValues_["B1"] = evBDS_B1;
+    mapStringValues_["B2"] = evBDS_B2;
     mapStringValues_["B3"] = evBDS_B3;
 
     // fill the signals queue with the satellites ID's to be searched by the acquisition
@@ -1231,6 +1232,7 @@ int GNSSFlowgraph::connect_signal_conditioners_to_channels()
                                 case evGLO_1G:
                                 case evGLO_2G:
                                 case evBDS_B1:
+                                case evBDS_B2:
                                 case evBDS_B3:
                                     acq_fs = fs;
                                     break;
@@ -1733,6 +1735,12 @@ void GNSSFlowgraph::assign_channels()
                             available_BDS_B1_signals_.remove(signal_value);
                             break;
 
+                        case evBDS_B2:
+                            gnss_system = "Beidou";
+                            signal_value = Gnss_Signal(Gnss_Satellite(gnss_system, sat), gnss_signal);
+                            available_BDS_B2_signals_.remove(signal_value);
+                            break;    
+
                         case evBDS_B3:
                             gnss_system = "Beidou";
                             signal_value = Gnss_Signal(Gnss_Satellite(gnss_system, sat), gnss_signal);
@@ -1845,6 +1853,11 @@ void GNSSFlowgraph::push_back_signal(const Gnss_Signal& gs)
             available_BDS_B1_signals_.push_back(gs);
             break;
 
+        case evBDS_B2:
+            available_BDS_B2_signals_.remove(gs);
+            available_BDS_B2_signals_.push_back(gs);
+            break;    
+
         case evBDS_B3:
             available_BDS_B3_signals_.remove(gs);
             available_BDS_B3_signals_.push_back(gs);
@@ -1900,6 +1913,10 @@ void GNSSFlowgraph::remove_signal(const Gnss_Signal& gs)
         case evBDS_B1:
             available_BDS_B1_signals_.remove(gs);
             break;
+
+        case evBDS_B2:
+            available_BDS_B2_signals_.remove(gs);
+            break;    
 
         case evBDS_B3:
             available_BDS_B3_signals_.remove(gs);
@@ -2637,6 +2654,29 @@ void GNSSFlowgraph::set_signals_list()
                 }
         }
 
+    if (configuration_->property("Channels_B2.count", 0) > 0)
+        {
+            // Loop to create the list of BeiDou B1C signals
+            //for (available_gnss_prn_iter = available_beidou_prn.cbegin();
+            //     available_gnss_prn_iter != available_beidou_prn.cend();
+            //     available_gnss_prn_iter++)
+            //    {
+            //        available_BDS_B2_signals_.emplace_back(
+            //            Gnss_Satellite(std::string("Beidou"), *available_gnss_prn_iter),
+            //            std::string("B2"));
+            //    }
+
+            available_BDS_B2_signals_.emplace_back(
+                        Gnss_Satellite(std::string("Beidou"), 59),
+                        std::string("B2"));
+            available_BDS_B2_signals_.emplace_back(
+                        Gnss_Satellite(std::string("Beidou"), 60),
+                        std::string("B2"));            
+            available_BDS_B2_signals_.emplace_back(
+                        Gnss_Satellite(std::string("Beidou"), 61),
+                        std::string("B2"));            
+        }    
+
     if (configuration_->property("Channels_B3.count", 0) > 0)
         {
             // Loop to create the list of BeiDou B1C signals
@@ -3015,6 +3055,15 @@ Gnss_Signal GNSSFlowgraph::search_next_signal(const std::string& searched_signal
                     available_BDS_B1_signals_.push_back(result);
                 }
             is_primary_frequency = true;  // indicate that the searched satellite signal belongs to "primary" link (L1, E1, B1, etc..)
+            break;
+
+        case evBDS_B2:
+            result = available_BDS_B2_signals_.front();
+            available_BDS_B2_signals_.pop_front();
+            if (!pop)
+                {
+                    available_BDS_B2_signals_.push_back(result);
+                }
             break;
 
         case evBDS_B3:

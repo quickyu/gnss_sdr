@@ -33,6 +33,7 @@
 #include "beidou_b3i_dll_pll_tracking.h"
 #include "beidou_b3i_pcps_acquisition.h"
 #include "beidou_b3i_telemetry_decoder.h"
+#include "beidou_b2b_pcps_acquisition.h"
 #include "byte_to_short.h"
 #include "channel.h"
 #include "configuration_interface.h"
@@ -318,6 +319,7 @@ std::unique_ptr<GNSSBlockInterface> GNSSBlockFactory::GetObservables(const Confi
     Glonass_channels += configuration->property("Channels_2G.count", 0);
     unsigned int Beidou_channels = configuration->property("Channels_B1.count", 0);
     Beidou_channels += configuration->property("Channels_B3.count", 0);
+    Beidou_channels += configuration->property("Channels_B2.count", 0);
     unsigned int extra_channels = 1;  // For monitor channel sample counter
     return GetBlock(configuration, "Observables",
         Galileo_channels +
@@ -353,6 +355,7 @@ std::unique_ptr<GNSSBlockInterface> GNSSBlockFactory::GetPVT(const Configuration
     Glonass_channels += configuration->property("Channels_2G.count", 0);
     unsigned int Beidou_channels = configuration->property("Channels_B1.count", 0);
     Beidou_channels += configuration->property("Channels_B3.count", 0);
+    Beidou_channels += configuration->property("Channels_B2.count", 0);
     return GetBlock(configuration, "PVT",
         Galileo_channels + GPS_channels + Glonass_channels + Beidou_channels, 0);
 }
@@ -409,7 +412,7 @@ std::unique_ptr<GNSSBlockInterface> GNSSBlockFactory::GetChannel(
     std::unique_ptr<AcquisitionInterface> acq_ = GetAcqBlock(configuration, "Acquisition_" + signal + appendix1, 1, 0);
     std::unique_ptr<TrackingInterface> trk_ = GetTrkBlock(configuration, "Tracking_" + signal + appendix2, 1, 1);
     std::unique_ptr<TelemetryDecoderInterface> tlm_ = GetTlmBlock(configuration, "TelemetryDecoder_" + signal + appendix3, 1, 1);
-
+        
     if (acq_ == nullptr or trk_ == nullptr or tlm_ == nullptr)
         {
             return nullptr;
@@ -447,6 +450,7 @@ std::unique_ptr<std::vector<std::unique_ptr<GNSSBlockInterface>>> GNSSBlockFacto
     const unsigned int Channels_B3_count = configuration->property("Channels_B3.count", 0);
     const unsigned int Channels_7X_count = configuration->property("Channels_7X.count", 0);
     const unsigned int Channels_E6_count = configuration->property("Channels_E6.count", 0);
+    const unsigned int Channels_B2_count = configuration->property("Channels_B2.count", 0);
 
     const unsigned int total_channels = Channels_1C_count +
                                         Channels_1B_count +
@@ -458,7 +462,8 @@ std::unique_ptr<std::vector<std::unique_ptr<GNSSBlockInterface>>> GNSSBlockFacto
                                         Channels_B1_count +
                                         Channels_B3_count +
                                         Channels_7X_count +
-                                        Channels_E6_count;
+                                        Channels_E6_count + 
+                                        Channels_B2_count;
 
     auto channels = std::make_unique<std::vector<std::unique_ptr<GNSSBlockInterface>>>(total_channels);
     try
@@ -605,6 +610,17 @@ std::unique_ptr<std::vector<std::unique_ptr<GNSSBlockInterface>>> GNSSBlockFacto
                         queue);
                     channel_absolute_id++;
                 }
+
+            LOG(INFO) << "Getting " << Channels_B2_count << " BEIDOU B2 channels";
+
+            for (unsigned int i = 0; i < Channels_B2_count; i++) {
+                // Store the channel into the vector of channels
+                channels->at(channel_absolute_id) = GetChannel(configuration,
+                        std::string("B2"),
+                        channel_absolute_id,
+                        queue);
+                channel_absolute_id++;
+            }    
         }
     catch (const std::exception& e)
         {
@@ -1419,6 +1435,12 @@ std::unique_ptr<AcquisitionInterface> GNSSBlockFactory::GetAcqBlock(
                 out_streams);
             block = std::move(block_);
         }
+    else if (implementation == "BEIDOU_B2b_PCPS_Acquisition")
+        {
+            std::unique_ptr<AcquisitionInterface> block_ = std::make_unique<BeidouB2bPcpsAcquisition>(configuration, role, in_streams,
+                out_streams);
+            block = std::move(block_);
+        }    
 #if OPENCL_BLOCKS
     else if (implementation == "GPS_L1_CA_PCPS_OpenCl_Acquisition")
         {
