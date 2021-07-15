@@ -34,6 +34,8 @@
 #include "beidou_b3i_pcps_acquisition.h"
 #include "beidou_b3i_telemetry_decoder.h"
 #include "beidou_b2b_pcps_acquisition.h"
+#include "beidou_b2b_dll_pll_tracking.h"
+#include "beidou_b2b_telemetry_decoder.h"
 #include "byte_to_short.h"
 #include "channel.h"
 #include "configuration_interface.h"
@@ -1603,6 +1605,12 @@ std::unique_ptr<TrackingInterface> GNSSBlockFactory::GetTrkBlock(
                 out_streams);
             block = std::move(block_);
         }
+    else if (implementation == "BEIDOU_B2b_DLL_PLL_Tracking")
+        {
+            std::unique_ptr<TrackingInterface> block_ = std::make_unique<BeidouB2bDllPllTracking>(configuration, role, in_streams,
+                out_streams);
+            block = std::move(block_);
+        }    
 #if CUDA_GPU_ACCEL
     else if (implementation == "GPS_L1_CA_DLL_PLL_Tracking_GPU")
         {
@@ -1734,6 +1742,12 @@ std::unique_ptr<TelemetryDecoderInterface> GNSSBlockFactory::GetTlmBlock(
                 out_streams);
             block = std::move(block_);
         }
+    else if (implementation == "BEIDOU_B2b_Telemetry_Decoder")
+        {
+            std::unique_ptr<TelemetryDecoderInterface> block_ = std::make_unique<BeidouB2bTelemetryDecoder>(configuration, role, in_streams,
+                out_streams);
+            block = std::move(block_);
+        }    
 
     else
         {
