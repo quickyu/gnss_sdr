@@ -54,6 +54,8 @@ private:
         const Tlm_Conf &conf);
 
     beidou_b2b_telemetry_decoder_gs(const Gnss_Satellite &satellite, const Tlm_Conf &conf);
+
+    void save_frame_symbol(std::string &symbol);
  
     Gnss_Satellite d_satellite;
 
@@ -62,7 +64,8 @@ private:
     std::vector<int32_t> d_preamble_samples;
     boost::circular_buffer<float> d_symbol_history;
 
-    std::ofstream d_cnav3_dump_file;
+    std::ofstream d_dump_file;
+    std::string d_dump_filename;
   
     int32_t d_channel;
     int32_t d_preamble_period_symbols;
@@ -77,6 +80,7 @@ private:
     bool d_sent_tlm_failed_msg;
     bool d_flag_preamble;
     bool d_flag_PLL_180_deg_phase_locked;
+    bool d_dump;
 };
 
 /** \} */

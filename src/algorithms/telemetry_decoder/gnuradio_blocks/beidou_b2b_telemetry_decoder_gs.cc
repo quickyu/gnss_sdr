@@ -1,9 +1,3 @@
-#include "beidou_b2b_telemetry_decoder_gs.h"
-#include "Beidou_B2b.h"
-#include "Beidou_CNAV3.h"
-#include "display.h"
-#include "gnss_synchro.h"
-#include "tlm_utils.h"
 #include <glog/logging.h>
 #include <gnuradio/io_signature.h>
 #include <pmt/pmt.h>        // for make_any
@@ -13,6 +7,15 @@
 #include <exception>        // for exception
 #include <iostream>         // for cout
 #include <memory>           // for shared_ptr, make_shared
+
+#include "beidou_cnav3_navigation_message.h"
+#include "beidou_b2b_telemetry_decoder_gs.h"
+#include "Beidou_B2b.h"
+#include "Beidou_CNAV3.h"
+#include "display.h"
+#include "gnss_synchro.h"
+#include "tlm_utils.h"
+#include "timestamp.h"
 
 #define CRC_ERROR_LIMIT 6
 
@@ -27,7 +30,7 @@ beidou_b2b_telemetry_decoder_gs::beidou_b2b_telemetry_decoder_gs(
     const Gnss_Satellite &satellite, const Tlm_Conf &conf __attribute__((unused)))
     : gr::block("beidou_b2b_telemetry_decoder_gs",
           gr::io_signature::make(1, 1, sizeof(Gnss_Synchro)),
-          gr::io_signature::make(1, 1, sizeof(Gnss_Synchro)))
+          gr::io_signature::make(1, 1, sizeof(struct cnav3_message_content)))
 {
     // prevent telemetry symbols accumulation in output buffers
     this->set_max_noutput_items(1);
@@ -60,15 +63,18 @@ beidou_b2b_telemetry_decoder_gs::beidou_b2b_telemetry_decoder_gs(
     for (int i = 0; i < d_samples_per_preamble; i++) {
         d_preamble_samples[i] = BEIDOU_CNAV3_PREAMBLE[i] == '1' ? -1 : 1;
     }
+
+    d_dump_filename = conf.dump_filename;
+    d_dump = conf.dump;
 }
 
 beidou_b2b_telemetry_decoder_gs::~beidou_b2b_telemetry_decoder_gs()
 {
     DLOG(INFO) << "BeiDou B2b Telemetry decoder block (channel " << d_channel << ") destructor called.";
 
-    if (d_cnav3_dump_file.is_open() == true) {
+    if (d_dump_file.is_open() == true) {
         try {
-            d_cnav3_dump_file.close();
+            d_dump_file.close();
         } catch (const std::exception &ex) {
             LOG(WARNING) << "Exception in destructor closing the dump file " << ex.what();
         }
@@ -94,16 +100,17 @@ void beidou_b2b_telemetry_decoder_gs::set_channel(int32_t channel)
     d_channel = channel;
     LOG(INFO) << "Navigation channel set to " << channel;
 
-    if (d_cnav3_dump_file.is_open() == false) {
-        try {
-            d_cnav3_dump_file.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-
-            std::string filename = "cnav3_dump_channel_" + std::to_string(d_channel) + ".log";
-            d_cnav3_dump_file.open(filename.c_str(), std::ios::out | std::ios::trunc);
-
-            LOG(INFO) << "CNAV3 message dump enabled on channel " << d_channel << " Log file: " << filename;
-        } catch (const std::ifstream::failure &e) {
-            LOG(WARNING) << "channel " << d_channel << " Exception opening cnav3 message dump file " << e.what();
+    if (d_dump) {
+        if (d_dump_file.is_open() == false) {
+            try {
+                d_dump_filename.append(std::to_string(d_channel));
+                d_dump_filename.append(".log");
+                d_dump_file.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+                d_dump_file.open(d_dump_filename.c_str(), std::ios::out | std::ios::trunc);
+                LOG(INFO) << "Beidou B2b Telemetry decoder dump enabled on channel " << d_channel << " Log file: " << d_dump_filename;
+            } catch (const std::ifstream::failure &e) {
+                LOG(WARNING) << "channel " << d_channel << " Exception opening cnav3 message dump file " << e.what();
+            }
         }
     }
 }
@@ -119,12 +126,18 @@ void beidou_b2b_telemetry_decoder_gs::reset()
     DLOG(INFO) << "Beidou B2b Telemetry decoder reset for satellite " << d_satellite;
 }
 
+void beidou_b2b_telemetry_decoder_gs::save_frame_symbol(std::string &symbol)
+{
+    d_dump_file << timestamp() << std::endl;
+    d_dump_file << symbol << std::endl << std::endl;
+}
+
 int beidou_b2b_telemetry_decoder_gs::general_work(
     int noutput_items __attribute__((unused)),
     gr_vector_int &ninput_items __attribute__((unused)),
     gr_vector_const_void_star &input_items, gr_vector_void_star &output_items)
 {
-    //auto **out = reinterpret_cast<Gnss_Synchro **>(&output_items[0]);           
+    auto **out = reinterpret_cast<struct cnav3_message_content **>(&output_items[0]);           
     const auto **in = reinterpret_cast<const Gnss_Synchro **>(&input_items[0]);  
 
     Gnss_Synchro current_symbol{};  
@@ -217,6 +230,10 @@ int beidou_b2b_telemetry_decoder_gs::general_work(
                 std::cout << "New Beidou CNAV3 message received in channel " << d_channel 
                         << " satellite " << d_satellite << std::endl ;
 
+                if (d_dump) {
+                    save_frame_symbol(data_bits_str);
+                }        
+
                 d_cnav3_message.frame_decode(data_bits_str);
 
                 d_preamble_index = d_sample_counter;  
@@ -238,7 +255,10 @@ int beidou_b2b_telemetry_decoder_gs::general_work(
         }
     }
 
-    d_cnav3_dump_file << d_cnav3_message;
+    if (d_cnav3_message.get_update_flag()) {
+        *out[0] = d_cnav3_message.get_message();
+        return 1;
+    }
 
     return 0;
 }
