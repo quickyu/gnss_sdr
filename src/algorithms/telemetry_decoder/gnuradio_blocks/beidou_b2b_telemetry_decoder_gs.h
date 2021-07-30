@@ -1,7 +1,6 @@
 #ifndef GNSS_SDR_BEIDOU_B2B_TELEMETRY_DECODER_GS_H
 #define GNSS_SDR_BEIDOU_B2B_TELEMETRY_DECODER_GS_H
 
-#include "beidou_cnav3_navigation_message.h"
 #include "gnss_block_interface.h"
 #include "gnss_satellite.h"
 #include "tlm_conf.h"
@@ -56,10 +55,9 @@ private:
     beidou_b2b_telemetry_decoder_gs(const Gnss_Satellite &satellite, const Tlm_Conf &conf);
 
     void save_frame_symbol(std::string &symbol);
+    bool crc_test(std::string const &frame) const;
  
     Gnss_Satellite d_satellite;
-
-    beidou_cnav3_navigation_message d_cnav3_message;
 
     std::vector<int32_t> d_preamble_samples;
     boost::circular_buffer<float> d_symbol_history;

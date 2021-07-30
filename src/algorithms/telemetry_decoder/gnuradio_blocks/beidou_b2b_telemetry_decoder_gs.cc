@@ -7,8 +7,10 @@
 #include <exception>        // for exception
 #include <iostream>         // for cout
 #include <memory>           // for shared_ptr, make_shared
+#include <boost/crc.hpp>  
+#include <boost/dynamic_bitset.hpp>
+#include <cstring>
 
-#include "beidou_cnav3_navigation_message.h"
 #include "beidou_b2b_telemetry_decoder_gs.h"
 #include "Beidou_B2b.h"
 #include "Beidou_CNAV3.h"
@@ -30,13 +32,9 @@ beidou_b2b_telemetry_decoder_gs::beidou_b2b_telemetry_decoder_gs(
     const Gnss_Satellite &satellite, const Tlm_Conf &conf __attribute__((unused)))
     : gr::block("beidou_b2b_telemetry_decoder_gs",
           gr::io_signature::make(1, 1, sizeof(Gnss_Synchro)),
-          gr::io_signature::make(1, 1, sizeof(struct cnav3_message_content)))
+          gr::io_signature::make(1, 1, 512))
 {
-    // prevent telemetry symbols accumulation in output buffers
     this->set_max_noutput_items(1);
-    // Ephemeris data port out
-    this->message_port_register_out(pmt::mp("telemetry"));
-    // Control messages to tracking block
     this->message_port_register_out(pmt::mp("telemetry_to_trk"));
     
     d_satellite = Gnss_Satellite(satellite.get_system(), satellite.get_PRN());
@@ -132,6 +130,29 @@ void beidou_b2b_telemetry_decoder_gs::save_frame_symbol(std::string &symbol)
     d_dump_file << symbol << std::endl << std::endl;
 }
 
+bool beidou_b2b_telemetry_decoder_gs::crc_test(std::string const &frame) const
+{
+    boost::dynamic_bitset<uint8_t> data_bits(
+            frame.substr(BEIDOU_CNAV3_DATA_START_POS, BEIDOU_CNAV3_DATA_LENGTH)
+        );
+
+    std::vector<uint8_t> data_bytes;
+    boost::to_block_range(data_bits, std::back_inserter(data_bytes));
+    std::reverse(data_bytes.begin(), data_bytes.end());
+
+    uint32_t checksum = std::bitset<24>(
+            frame.substr(BEIDOU_CNAV3_CRC_START_POS, BEIDOU_CNAV3_CRC_LENGTH)
+        ).to_ulong(); 
+
+    boost::crc_optimal<24, 0x864CFB, 0, 0, false, false> beidou_crc;
+
+    beidou_crc.process_bytes(data_bytes.data(), BEIDOU_CNAV3_DATA_BYTES);
+
+    const uint32_t crc_computed = beidou_crc.checksum();
+
+    return checksum == crc_computed;
+}
+
 int beidou_b2b_telemetry_decoder_gs::general_work(
     int noutput_items __attribute__((unused)),
     gr_vector_int &ninput_items __attribute__((unused)),
@@ -163,6 +184,9 @@ int beidou_b2b_telemetry_decoder_gs::general_work(
         }
     }
    
+    bool new_frame = false;
+    std::string data_bits_str;
+
     switch (d_stat) {
     case 0:
         {
@@ -218,14 +242,15 @@ int beidou_b2b_telemetry_decoder_gs::general_work(
         {
             if (d_sample_counter == 
                     d_preamble_index + static_cast<uint64_t>(d_preamble_period_symbols)) {   
-                std::string data_bits_str = "";
-                for (int i = 0; i < 498; i++) {
+                for (int i = 0; i < BEIDOU_CNAV3_FRAME_BITS; i++) {
                     float symbol = d_symbol_history[i+d_samples_per_preamble];
                     if (d_flag_PLL_180_deg_phase_locked)
                         symbol = -symbol;
 
                     data_bits_str += symbol < 0.0 ? '1' : '0';
                 }
+
+                d_preamble_index = d_sample_counter;  
 
                 std::cout << "New Beidou CNAV3 message received in channel " << d_channel 
                         << " satellite " << d_satellite << std::endl ;
@@ -234,15 +259,13 @@ int beidou_b2b_telemetry_decoder_gs::general_work(
                     save_frame_symbol(data_bits_str);
                 }        
 
-                d_cnav3_message.frame_decode(data_bits_str);
-
-                d_preamble_index = d_sample_counter;  
-
-                if (d_cnav3_message.get_flag_crc_test() == true) {
+                if (crc_test(data_bits_str) == true) {
                     d_crc_error_counter = 0;
+                    new_frame = true;
                     gr::thread::scoped_lock lock(d_setlock);
                     d_last_valid_preamble = d_sample_counter;
                 } else {
+                    std::cout << "CNAV3 message crc error" << std::endl;
                     d_crc_error_counter++;
                     if (d_crc_error_counter > CRC_ERROR_LIMIT) {
                         std::cout << "Lost of frame sync SAT " << this->d_satellite;
@@ -255,8 +278,8 @@ int beidou_b2b_telemetry_decoder_gs::general_work(
         }
     }
 
-    if (d_cnav3_message.get_update_flag()) {
-        *out[0] = d_cnav3_message.get_message();
+    if (new_frame) {
+        std::memcpy(out[0], data_bits_str.data(), BEIDOU_CNAV3_FRAME_BITS);
         return 1;
     }
 
