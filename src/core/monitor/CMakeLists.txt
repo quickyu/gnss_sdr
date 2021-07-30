@@ -10,12 +10,14 @@ protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS ${CMAKE_SOURCE_DIR}/docs/protobuf/gn
 set(CORE_MONITOR_LIBS_SOURCES
     gnss_synchro_monitor.cc
     gnss_synchro_udp_sink.cc
+    rtcm_ssr_sink.cc
 )
 
 set(CORE_MONITOR_LIBS_HEADERS
     gnss_synchro_monitor.h
     gnss_synchro_udp_sink.h
     serdes_gnss_synchro.h
+    rtcm_ssr_sink.h
 )
 
 list(SORT CORE_MONITOR_LIBS_HEADERS)
