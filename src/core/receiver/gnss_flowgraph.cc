@@ -36,6 +36,7 @@
 #include "gnss_satellite.h"
 #include "gnss_sdr_make_unique.h"
 #include "gnss_synchro_monitor.h"
+#include "rtcm_ssr_sink.h"
 #include "signal_source_interface.h"
 #include <boost/lexical_cast.hpp>    // for boost::lexical_cast
 #include <boost/tokenizer.hpp>       // for boost::tokenizer
@@ -135,9 +136,16 @@ void GNSSFlowgraph::init()
             signal_conditioner_connected_ = std::vector<bool>(sig_conditioner_.size(), false);
         }
 
-    observables_ = block_factory->GetObservables(configuration_.get());
+    std::string signal = configuration_->property("Channel.signal", std::string("1C"));
+    sig_ppp_b2b_ = signal == "B2";
 
-    pvt_ = block_factory->GetPVT(configuration_.get());
+    if (sig_ppp_b2b_) {
+        observables_ = nullptr;
+        pvt_ = nullptr;
+    } else {
+        observables_ = block_factory->GetObservables(configuration_.get());
+        pvt_ = block_factory->GetPVT(configuration_.get());
+    }    
 
     auto channels = block_factory->GetChannels(configuration_.get(), queue_.get());
 
@@ -237,6 +245,14 @@ void GNSSFlowgraph::init()
                 configuration_->property("TrackingMonitor.udp_port", 1236),
                 udp_addr_vec, enable_protobuf);
         }
+
+    if (sig_ppp_b2b_) {
+        std::string dest_address = configuration_->property("RTCM.dest_address", std::string("127.0.0.1"));
+        int udp_port = configuration_->property("RTCM.udp_port", 8888);
+        bool enable_log = configuration_->property("RTCM.enable_log", false);
+
+        rtcm_ssr_sink_ = make_rtcm_ssr_sink(channels_count_, udp_port, dest_address, enable_log);
+    }    
 }
 
 
@@ -386,70 +402,69 @@ void GNSSFlowgraph::disconnect()
 int GNSSFlowgraph::connect_desktop_flowgraph()
 {
     // Connect blocks to the top_block
-    if (connect_signal_sources() != 0)
-        {
+
+    if (sig_ppp_b2b_) {
+        if (connect_signal_sources() != 0) 
             return 1;
-        }
 
-    if (connect_signal_conditioners() != 0)
-        {
+        if (connect_signal_conditioners() != 0) 
             return 1;
-        }
-
-    if (connect_channels() != 0)
-        {
+        
+        if (connect_channels() != 0)
             return 1;
-        }
 
-    if (connect_observables() != 0)
-        {
+        if (connect_signal_sources_to_signal_conditioners() != 0)
+            return 1;    
+
+        if (connect_signal_conditioners_to_channels() != 0)
+            return 1;    
+
+        if (connect_channels_to_rtcm_ssr_sink() != 0)
             return 1;
-        }
 
-    if (connect_pvt() != 0)
-        {
+        check_signal_conditioners();
+        assign_channels();    
+    } else {
+        if (connect_signal_sources() != 0) 
             return 1;
-        }
 
-    // Connect blocks between them to form the flow graph
-    if (connect_signal_sources_to_signal_conditioners() != 0)
-        {
+        if (connect_signal_conditioners() != 0) 
             return 1;
-        }
-
-    if (connect_sample_counter() != 0)
-        {
+        
+        if (connect_channels() != 0)
             return 1;
-        }
-
-    if (connect_signal_conditioners_to_channels() != 0)
-        {
+        
+        if (connect_observables() != 0) 
             return 1;
-        }
-
-    if (connect_channels_to_observables() != 0)
-        {
+        
+        if (connect_pvt() != 0) 
             return 1;
-        }
-
-    check_signal_conditioners();
-
-    assign_channels();
-
-    if (connect_observables_to_pvt() != 0)
-        {
+        
+        // Connect blocks between them to form the flow graph
+        if (connect_signal_sources_to_signal_conditioners() != 0)
             return 1;
-        }
-
-    if (connect_monitors() != 0)
-        {
+        
+        if (connect_sample_counter() != 0)
             return 1;
-        }
-
-    if (connect_gal_e6_has() != 0)
-        {
+        
+        if (connect_signal_conditioners_to_channels() != 0)
             return 1;
-        }
+        
+        if (connect_channels_to_observables() != 0)
+            return 1;
+        
+        check_signal_conditioners();
+        assign_channels();
+
+        if (connect_observables_to_pvt() != 0)
+            return 1;
+
+        if (connect_monitors() != 0)
+            return 1;
+        
+        if (connect_gal_e6_has() != 0)
+            return 1;
+    }
 
     // Activate acquisition in enabled channels
     for (int i = 0; i < channels_count_; i++)
@@ -474,61 +489,59 @@ int GNSSFlowgraph::connect_desktop_flowgraph()
 int GNSSFlowgraph::disconnect_desktop_flowgraph()
 {
     // Disconnect blocks between them
-    if (disconnect_signal_sources_from_signal_conditioners() != 0)
-        {
+    if (sig_ppp_b2b_) {
+        if (disconnect_channels_from_rtcm_ssr_sink() != 0)
             return 1;
-        }
+            
+        if (disconnect_signal_sources_from_signal_conditioners() != 0)
+            return 1;
 
-    if (disconnect_sample_counter() != 0)
-        {
+        if (disconnect_signal_conditioners_from_channels() != 0)
             return 1;
-        }
 
-    if (disconnect_signal_conditioners_from_channels() != 0)
-        {
+        if (disconnect_signal_sources() != 0)
             return 1;
-        }
-
-    if (disconnect_channels_from_observables() != 0)
-        {
+        
+        if (disconnect_signal_conditioners() != 0)
             return 1;
-        }
-
-    if (disconnect_monitors() != 0)
-        {
+        
+        if (disconnect_channels() != 0)
             return 1;
-        }
-
-    if (disconnect_observables_from_pvt() != 0)
-        {
+    } else {
+        if (disconnect_signal_sources_from_signal_conditioners() != 0)
             return 1;
-        }
-
-    // Disconnect blocks from the top_block
-    if (disconnect_signal_sources() != 0)
-        {
+        
+        if (disconnect_sample_counter() != 0)
             return 1;
-        }
-
-    if (disconnect_signal_conditioners() != 0)
-        {
+        
+        if (disconnect_signal_conditioners_from_channels() != 0)
             return 1;
-        }
-
-    if (disconnect_channels() != 0)
-        {
+        
+        if (disconnect_channels_from_observables() != 0)
             return 1;
-        }
-
-    if (disconnect_observables() != 0)
-        {
+        
+        if (disconnect_monitors() != 0)
             return 1;
-        }
-
-    if (disconnect_pvt() != 0)
-        {
+        
+        if (disconnect_observables_from_pvt() != 0)
             return 1;
-        }
+        
+        // Disconnect blocks from the top_block
+        if (disconnect_signal_sources() != 0)
+            return 1;
+        
+        if (disconnect_signal_conditioners() != 0)
+            return 1;
+        
+        if (disconnect_channels() != 0)
+            return 1;
+        
+        if (disconnect_observables() != 0)
+            return 1;
+        
+        if (disconnect_pvt() != 0)
+            return 1;
+    }
 
     return 0;
 }
@@ -1573,6 +1586,48 @@ int GNSSFlowgraph::connect_gal_e6_has()
         }
     DLOG(INFO) << "Galileo E6 HAS message ports connected";
     return 0;
+}
+
+int GNSSFlowgraph::connect_channels_to_rtcm_ssr_sink()
+{
+    try {
+        for (int i = 0; i < channels_count_; i++) {
+            top_block_->connect(channels_.at(i)->get_right_block(), 0, rtcm_ssr_sink_, i);
+        }
+
+        const double fs = static_cast<double>(configuration_->property("GNSS-SDR.internal_fs_sps", 0));
+
+        ch_out_sample_counter_ = gnss_sdr_make_sample_counter(fs, 20, 
+                        sig_conditioner_.at(0)->get_right_block()->output_signature()->sizeof_stream_item(0));
+
+        sample_counter_null_sink_ = gr::blocks::null_sink::make(sizeof(Gnss_Synchro));
+          
+        top_block_->connect(sig_conditioner_.at(0)->get_right_block(), 0, ch_out_sample_counter_, 0);
+        top_block_->connect(ch_out_sample_counter_, 0, sample_counter_null_sink_, 0); 
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Can't connect channel to rtcm_ssr_sink: " << e.what();
+        top_block_->disconnect_all();
+        return 1;
+    } 
+
+    DLOG(INFO) << "Channel blocks successfully connected to the rtcm_ssr_sink block";
+    return 0;
+}
+
+int GNSSFlowgraph::disconnect_channels_from_rtcm_ssr_sink()
+{
+    try {
+        for (int i = 0; i < channels_count_; i++) {
+            top_block_->disconnect(channels_.at(i)->get_right_block(), 0, rtcm_ssr_sink_, i);
+        }
+
+        top_block_->disconnect(sig_conditioner_.at(0)->get_right_block(), 0, ch_out_sample_counter_, 0);
+        top_block_->disconnect(ch_out_sample_counter_, 0, sample_counter_null_sink_, 0); 
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Can't disconnect channel to rtcm_ssr_sink: " << e.what();
+        top_block_->disconnect_all();
+        return 1;
+    } 
 }
 
 int GNSSFlowgraph::disconnect_monitors()
