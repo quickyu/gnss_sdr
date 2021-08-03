@@ -1628,6 +1628,8 @@ int GNSSFlowgraph::disconnect_channels_from_rtcm_ssr_sink()
         top_block_->disconnect_all();
         return 1;
     } 
+
+    return 0;
 }
 
 int GNSSFlowgraph::disconnect_monitors()
