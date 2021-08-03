@@ -78,44 +78,8 @@ std::string rtcm_ssr_sink::timestamp()
    return stream.str();
 }
 
-/*
-std::string rtcm_ssr_sink::parser_message(int type, const uint8_t *data)
-{
-   boost::format output_str;
-
-   switch (type) {
-   case CNAV3_MSG_1:
-   {
-      const struct cnav3_msg_type_1 *msg = reinterpret_cast<const struct cnav3_msg_type_1 *>(data);
-      output_str.parse("epoch_time: %d, iod_ssr: %d, iodp: %d, bds_mask: %016x, gps_mask: %016x, "
-            "gal_mask: %016x, glo_mask: %016x")
-            % msg->epoch_time % msg->iod_ssr % msg->iodp % msg->bds_mask 
-            % msg->gps_mask % msg->gal_mask % msg->glo_mask;
-      break;   
-   }   
-
-   case CNAV3_MSG_2:
-   case CNAV3_MSG_3: 
-   case CNAV3_MSG_4:
-   default: ;  
-   }
-
-   return output_str.str();
-}
-*/
-
-void rtcm_ssr_sink::write_log_file(std::ofstream &log_file, const struct cnav3_message_content &content)
-{
-   //log_file << "> " << timestamp() << "  CNAV3 message " << content.msg_type 
-   //   << "  PRN " << content.prn << "  ppp_status " << content.ppp_status << std::endl;
-
-   //log_file << parser_message(content.msg_type, content.data) << std::endl;
-   
-   //log_file << std::endl;   
-}
-
 int rtcm_ssr_sink::general_work(int noutput_items __attribute__((unused)), gr_vector_int &ninput_items,
-    gr_vector_const_void_star &input_items, gr_vector_void_star &output_items __attribute__((unused)))
+         gr_vector_const_void_star &input_items, gr_vector_void_star &output_items __attribute__((unused)))
 {
    const char **in = reinterpret_cast<const char **>(&input_items[0]);
 
@@ -127,8 +91,59 @@ int rtcm_ssr_sink::general_work(int noutput_items __attribute__((unused)), gr_ve
          uint32_t ppp_status = std::bitset<6>(frame_bits.substr(6, 6)).to_ulong();
          uint32_t msg_type = std::bitset<6>(frame_bits.substr(12, 6)).to_ulong();
 
-         std::cout << "Beidou CNAV3 message  prn " << prn << "  ppp_status " << ppp_status 
-            << "  type " << msg_type << std::endl;
+         std::string msg_info = timestamp() + "  Beidou CNAV3 message  " + "  prn: " + std::to_string(prn) + 
+            "  ppp status: " + std::to_string(ppp_status) + "  type: " + std::to_string(msg_type);
+
+         std::cout << msg_info << std::endl;
+         if (d_log_to_file)
+            d_log_files[channel_index] << msg_info << std::endl;
+
+         switch (msg_type) {
+         case CNAV3_MSG_1: 
+         {
+            beidou_cnav3_navigation_message::message1_data msg1 = 
+               cnav3_message.message1_decode(frame_bits.substr(12, BEIDOU_CNAV3_DATA_LENGTH));
+            if (d_log_to_file) {
+               d_log_files[channel_index] << msg1 << std::endl;
+            }   
+            break;
+         }   
+
+         case CNAV3_MSG_2: 
+         {
+            beidou_cnav3_navigation_message::message2_data msg2 = 
+               cnav3_message.message2_decode(frame_bits.substr(12, BEIDOU_CNAV3_DATA_LENGTH));
+            if (d_log_to_file) {
+               d_log_files[channel_index] << msg2 << std::endl;
+            }   
+            break;
+         }   
+
+         case CNAV3_MSG_3:
+         {
+            beidou_cnav3_navigation_message::message3_data msg3 = 
+               cnav3_message.message3_decode(frame_bits.substr(12, BEIDOU_CNAV3_DATA_LENGTH));
+            if (d_log_to_file) {
+               d_log_files[channel_index] << msg3 << std::endl;
+            }   
+            break;
+         }   
+
+         case CNAV3_MSG_4: 
+         {
+            beidou_cnav3_navigation_message::message4_data msg4 = 
+               cnav3_message.message4_decode(frame_bits.substr(12, BEIDOU_CNAV3_DATA_LENGTH));
+            if (d_log_to_file) {
+               d_log_files[channel_index] << msg4 << std::endl;
+            }   
+            break;
+         }   
+
+         default: 
+            if (d_log_to_file) {
+               d_log_files[channel_index] << std::endl;
+            } 
+         }
       }
 
       consume(channel_index, ninput_items[channel_index]);

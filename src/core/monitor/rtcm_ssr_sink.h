@@ -27,15 +27,14 @@ private:
    rtcm_ssr_sink(int n_channels, int udp_port, std::string &udp_address, bool log_to_file);
 
    std::string timestamp();
-   void write_log_file(std::ofstream &log_file, const cnav3_message_content &content);
-   //std::string parser_message(int type, const uint8_t *data);
-
+  
    int d_udp_port;
    int d_nchannels;
    bool d_log_to_file;
 
    std::string d_udp_address;
    std::vector<std::ofstream> d_log_files;
+   beidou_cnav3_navigation_message cnav3_message;
 };
 
 #endif
