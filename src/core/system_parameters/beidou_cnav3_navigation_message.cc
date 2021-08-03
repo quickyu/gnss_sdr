@@ -1,167 +1,199 @@
-#include <boost/crc.hpp>  
-#include <boost/dynamic_bitset.hpp>
-#include <boost/format.hpp>
-#include <glog/logging.h>
-#include <iostream>  
-#include <ctime>
-#include <locale>
+ #include <boost/format.hpp>
 
 #include "beidou_cnav3_navigation_message.h"
-
-beidou_cnav3_navigation_message::beidou_cnav3_navigation_message()
-{
-
-}
-
-bool beidou_cnav3_navigation_message::crc_test(const std::vector<uint8_t> &bytes, uint32_t checksum) const
-{
-    boost::crc_optimal<24, 0x864CFB, 0, 0, false, false> beidou_crc;
-
-    beidou_crc.process_bytes(bytes.data(), BEIDOU_CNAV3_DATA_FRAME_BYTES);
-
-    const uint32_t crc_computed = beidou_crc.checksum();
-
-    return checksum == crc_computed;
-}
+#include "Beidou_CNAV3.h"
 
 template<typename rv_type>
-rv_type beidou_cnav3_navigation_message::read_unsigned(const std::pair<int32_t, int32_t> &parameter)
+rv_type beidou_cnav3_navigation_message::read_unsigned(const std::string &data_bits, const std::pair<int32_t, int32_t> &parameter)
 {
-    int start_pos = m_data_field_bits.size() - parameter.first - 1;
+    int start_pos = parameter.first;
     rv_type result = 0;
 
     for (int i = 0; i < parameter.second; i++) {
         result <<= 1;
-        result |= m_data_field_bits[start_pos - i];
+
+        if (data_bits[start_pos + i] == '1')
+            result |= 1;
     }
    
     return result;
 }
 
-void beidou_cnav3_navigation_message::frame_decode(std::string const &cnav_frames_str)
+beidou_cnav3_navigation_message::message1_data beidou_cnav3_navigation_message::message1_decode(std::string const &frame_data_bits)
 {
-    m_data_field_bits = boost::dynamic_bitset<uint8_t>(cnav_frames_str.substr(12, 462));
+    message1_data data;
 
-    std::vector<uint8_t> data_bytes;
-    boost::to_block_range(m_data_field_bits, std::back_inserter(data_bytes));
-    std::reverse(data_bytes.begin(), data_bytes.end());
-   
-    uint32_t checksum = std::bitset<24>(cnav_frames_str.substr(474, 24)).to_ulong(); 
-    d_flag_crc_test = crc_test(data_bytes, checksum); 
+    data.epoch_time = read_unsigned<uint32_t>(frame_data_bits, M1_EPOCH);
+    data.iod_ssr = read_unsigned<uint8_t>(frame_data_bits, M1_IODSSR);
+    data.iodp = read_unsigned<uint8_t>(frame_data_bits, M1_IODP);
+    data.bds_mask = read_unsigned<uint64_t>(frame_data_bits, M1_BDSMASK);
+    data.gps_mask = read_unsigned<uint64_t>(frame_data_bits, M1_GPSMASK);
+    data.gal_mask = read_unsigned<uint64_t>(frame_data_bits, M1_GALMASK);
+    data.glo_mask = read_unsigned<uint64_t>(frame_data_bits, M1_GLOMASK);
 
-    if (d_flag_crc_test) {
-        uint32_t prn = boost::dynamic_bitset<>(cnav_frames_str.substr(0, 6)).to_ulong();
-        uint32_t ppp_status = boost::dynamic_bitset<>(cnav_frames_str.substr(6, 6)).to_ulong();
-        uint32_t msg_type = read_unsigned<uint32_t>(MSGTYPE);
+    return data;
+}
 
-        std::cout << "CNAV3 message PRN=" << prn << ", ppp_status=" << ppp_status 
-            << ", message_type=" << msg_type << std::endl;
+beidou_cnav3_navigation_message::message2_data beidou_cnav3_navigation_message::message2_decode(std::string const &frame_data_bits)
+{
+    message2_data data;
 
-        d_content.prn = prn;
-        d_content.ppp_status = ppp_status;    
-        d_content_update = false;
+    data.epoch_time = read_unsigned<uint32_t>(frame_data_bits, M2_EPOCH);
+    data.iod_ssr = read_unsigned<uint8_t>(frame_data_bits, M2_IODSSR);
 
-        switch (msg_type) {
-        case CNAV3_MSG_1:
-        {
-            d_content.msg_type = msg_type;
-            
-            struct cnav3_msg_type_1 *msg = reinterpret_cast<struct cnav3_msg_type_1 *>(d_content.data);
+    for (int i = 0; i < 6; i++) {
+        data.satslot[i] = read_unsigned<uint16_t>(frame_data_bits, std::pair(M2_SATSLOT.first + 69*i, M2_SATSLOT.second));
+        data.iodn[i] = read_unsigned<uint16_t>(frame_data_bits, std::pair(M2_IODN.first + 69*i, M2_IODN.second));
+        data.iod_corr[i] = read_unsigned<uint8_t>(frame_data_bits, std::pair(M2_IOD_CORR.first + 69*i, M2_IOD_CORR.second));
 
-            msg->epoch_time = read_unsigned<uint32_t>(M1_EPOCH);
-            msg->iod_ssr = read_unsigned<uint8_t>(M1_IODSSR);
-            msg->iodp = read_unsigned<uint8_t>(M1_IODP);
-            msg->bds_mask = read_unsigned<uint64_t>(M1_BDSMASK);
-            msg->gps_mask = read_unsigned<uint64_t>(M1_GPSMASK);
-            msg->gal_mask = read_unsigned<uint64_t>(M1_GALMASK);
-            msg->glo_mask = read_unsigned<uint64_t>(M1_GLOMASK);
+        int32_t val;
 
-            d_content_update = true;
-            break;    
-        }    
-        
-        case CNAV3_MSG_2:
-        {
-            d_content.msg_type = msg_type;
+        val = read_unsigned<uint16_t>(frame_data_bits, std::pair(M2_RADIAL.first + 69*i, M2_RADIAL.second));
+        if (val >= 16384)
+            val -= 32768;
+        data.radial[i] = val * 0.0016f;
 
-            struct cnav3_msg_type_2 *msg = reinterpret_cast<struct cnav3_msg_type_2 *>(d_content.data);
+        val = read_unsigned<uint16_t>(frame_data_bits, std::pair(M2_ALONG.first + 69*i, M2_ALONG.second));
+        if (val >= 4096)
+            val -= 8192;
+        data.along[i] = val * 0.0064f;
 
-            msg->epoch_time = read_unsigned<uint32_t>(M2_EPOCH);
-            msg->iod_ssr = read_unsigned<uint8_t>(M2_IODSSR);
+        val = read_unsigned<uint16_t>(frame_data_bits, std::pair(M2_CROSS.first + 69*i, M2_CROSS.second));   
+        if (val >= 4096)
+            val -= 8192;
+        data.cross[i] = val * 0.0064f;
 
-            int step = M2_SATSLOT.second + M2_IODN.second + M2_IOD_CORR.second + M2_RADIAL.second + 
-                M2_ALONG.second + M2_CROSS.second + M2_URA_CLASS.second + M2_URA_VAL.second;
+        data.ura_class[i] = read_unsigned<uint8_t>(frame_data_bits, std::pair(M2_URA_CLASS.first + 69*i, M2_URA_CLASS.second));
+        data.ura_val[i] = read_unsigned<uint8_t>(frame_data_bits, std::pair(M2_URA_VAL.first + 69*i, M2_URA_VAL.second));
+    }
 
-            for (int i = 0; i < 6; i++) {
-                msg->satslot[i] = read_unsigned<uint16_t>(std::pair(M2_SATSLOT.first + step*i, M2_SATSLOT.second));
-                msg->iodn[i] = read_unsigned<uint16_t>(std::pair(M2_IODN.first + step*i, M2_IODN.second));
-                msg->iod_corr[i] = read_unsigned<uint8_t>(std::pair(M2_IOD_CORR.first + step*i, M2_IOD_CORR.second));
-                msg->radial[i] = read_unsigned<uint16_t>(std::pair(M2_RADIAL.first + step*i, M2_RADIAL.second));
-                msg->along[i] = read_unsigned<uint16_t>(std::pair(M2_ALONG.first + step*i, M2_ALONG.second));
-                msg->cross[i] = read_unsigned<uint16_t>(std::pair(M2_CROSS.first + step*i, M2_CROSS.second));
-                msg->ura_class[i] = read_unsigned<uint8_t>(std::pair(M2_URA_CLASS.first + step*i, M2_URA_CLASS.second));
-                msg->ura_val[i] = read_unsigned<uint8_t>(std::pair(M2_URA_VAL.first + step*i, M2_URA_VAL.second));
-            }
+    return data;
+}
 
-            d_content_update = true;
-            break;
-        }    
+beidou_cnav3_navigation_message::message3_data beidou_cnav3_navigation_message::message3_decode(std::string const &frame_data_bits)
+{
+    message3_data data;
 
-        case CNAV3_MSG_3: 
-        {
-            d_content.msg_type = msg_type;
+    data.epoch_time = read_unsigned<uint32_t>(frame_data_bits, M3_EPOCH);
+    data.iod_ssr = read_unsigned<uint8_t>(frame_data_bits, M3_IODSSR);
+    data.sat_num = read_unsigned<uint8_t>(frame_data_bits, M3_SATNUM);
 
-            struct cnav3_msg_type_3 *msg = reinterpret_cast<struct cnav3_msg_type_3 *>(d_content.data);
+    data.sat_slot.fill({});
+    data.code_bias_num.fill({});
+    data.signal.fill({});
+    data.code_bias.fill({});
 
-            msg->epoch_time = read_unsigned<uint32_t>(M3_EPOCH);
-            msg->iod_ssr = read_unsigned<uint8_t>(M3_IODSSR);
-            msg->sat_num = read_unsigned<uint8_t>(M3_SATNUM);
+    int32_t bit_off = M3_SATNUM.first + M3_SATNUM.second;
 
-            int sat_start_pos = M3_SATSLOT.first;
-
-            for (int i = 0; i < msg->sat_num; i++) {
-                msg->sat_slot[i] = read_unsigned<uint16_t>(std::pair(sat_start_pos, M3_SATSLOT.second));
-                msg->code_bias_num[i] = read_unsigned<uint8_t>(std::pair(sat_start_pos + M3_CODEBIAS_NUM_OFF.first, M3_CODEBIAS_NUM_OFF.second));
+    for (int32_t i = 0; i < data.sat_num; i++) {
+        data.sat_slot[i] = read_unsigned<uint16_t>(frame_data_bits, std::pair(bit_off, M3_SATSLOT_LEN));
+        bit_off += M3_SATSLOT_LEN;
+        data.code_bias_num[i] = read_unsigned<uint8_t>(frame_data_bits, std::pair(bit_off, M3_CODEBIAS_LEN));
+        bit_off += M3_CODEBIAS_LEN;
                
-                int code_step = 0;
+        for (int32_t j = 0; j < data.code_bias_num[i]; j++) {
+            data.signal[i][j] = read_unsigned<uint8_t>(frame_data_bits, std::pair(bit_off, M3_SIGNAL_LEN));
+            bit_off += M3_SIGNAL_LEN;
 
-                for (int j = 0; j < msg->code_bias_num[i]; j++) {
-                    msg->signal[i][j] = read_unsigned<uint8_t>(std::pair(sat_start_pos + M3_SIGNAL_OFF.first + code_step, M3_SIGNAL_OFF.second));
-                    msg->code_bias[i][j] = read_unsigned<uint16_t>(std::pair(sat_start_pos + M3_CODEBIAS_OFF.first + code_step, M3_CODEBIAS_OFF.second));
-                    code_step += M3_SIGNAL_OFF.second + M3_CODEBIAS_OFF.second;
-                }
+            int32_t val = read_unsigned<uint16_t>(frame_data_bits, std::pair(bit_off, M3_CODEBIAS_LEN));
+            if (val >= 2048)
+                val -= 4096;
+            data.code_bias[i][j] = val * 0.017f;
+            bit_off += M3_CODEBIAS_LEN;
+        }
+    }
 
-                sat_start_pos += M3_SATSLOT.second + M3_CODEBIAS_NUM_OFF.second + code_step;
+    return data;
+}
+
+beidou_cnav3_navigation_message::message4_data beidou_cnav3_navigation_message::message4_decode(std::string const &frame_data_bits)
+{
+    message4_data data;
+
+    data.epoch_time = read_unsigned<uint32_t>(frame_data_bits, M4_EPOCH);
+    data.iod_ssr = read_unsigned<uint8_t>(frame_data_bits, M4_IODSSR);
+    data.iodp = read_unsigned<uint8_t>(frame_data_bits, M4_IODP);
+    data.sub_type = read_unsigned<uint8_t>(frame_data_bits, M4_SUB_TYPE);
+            
+    for (int32_t i = 0; i < 23; i++) {
+        data.iod_corr[i] = read_unsigned<uint8_t>(frame_data_bits, std::pair(M4_IOD_CORR.first + 18*i, M4_IOD_CORR.second));
+
+        int32_t val = read_unsigned<uint16_t>(frame_data_bits, std::pair(M4_C0.first + 18*i, M4_C0.second));
+        if (val >= 16384)
+            val -= 32768;
+        data.c0[i] = val * 0.0016f;
+    }
+
+    return data;
+}
+
+std::ostream & operator<<(std::ostream &out, const beidou_cnav3_navigation_message::message1_data data)  
+{
+    out << boost::format("epoch time: %d  iod ssr: %d  iodp: %d  bds mask: %016x  "
+        "gps mask: %016x  gal mask: %016x  glo mask: %016x\n")
+        % data.epoch_time % uint32_t(data.iod_ssr) % uint32_t(data.iodp) % data.bds_mask 
+        % data.gps_mask % data.gal_mask % data.glo_mask;
+    return out;
+}
+
+std::ostream & operator<<(std::ostream &out, const beidou_cnav3_navigation_message::message2_data data)
+{
+    out << boost::format("epoch time: %d  iod ssr: %d\n") % data.epoch_time % uint32_t(data.iod_ssr);
+    
+    for (int i = 0; i < 6; i++) {
+        out << boost::format("satslot: %d  iodn: %d  iod corr: %d  radial: %11.7f  along: %11.7f, "
+            "cross: %11.7f  ura class: %d  ura value: %d\n")
+            % uint32_t(data.satslot[i]) % uint32_t(data.iodn[i]) % uint32_t(data.iod_corr[i]) 
+            % data.radial[i] % data.along[i] % data.cross[i]
+            % uint32_t(data.ura_class[i]) % uint32_t(data.ura_val[i]);
+    }
+
+    return out;
+}
+
+std::ostream & operator<<(std::ostream &out, const beidou_cnav3_navigation_message::message3_data data)
+{
+    out << boost::format("epoch time: %d, iod ssr: %d, sat num: %d\n") 
+            % data.epoch_time % uint32_t(data.iod_ssr) % uint32_t(data.sat_num);
+
+    for (int32_t i = 0; i < data.sat_num; i++) {
+        out << boost::format("sat slot: %d  code bias num: %d  \n\t") % uint32_t(data.sat_slot[i]) % uint32_t(data.code_bias_num[i]);
+
+        int cnt = 0;
+        for (int32_t j = 0; j < int32_t(data.code_bias_num[i]); j++) {
+            out << boost::format("(signal: %2d  code bias: %11.7f)\t") % uint32_t(data.signal[i][j]) % data.code_bias[i][j];
+            if (++cnt == 5) {
+                cnt = 0;
+                out << "\n\t";
             }
 
-            d_content_update = true;
-            break;
         }
 
-        case CNAV3_MSG_4:
-        {
-            d_content.msg_type = msg_type;
-            
-            struct cnav3_msg_type_4 *msg = reinterpret_cast<struct cnav3_msg_type_4 *>(d_content.data);
-
-            msg->epoch_time = read_unsigned<uint32_t>(M4_EPOCH);
-            msg->iod_ssr = read_unsigned<uint8_t>(M4_IODSSR);
-            msg->iodp = read_unsigned<uint8_t>(M4_IODP);
-            msg->sub_type = read_unsigned<uint8_t>(M4_SUB_TYPE);
-            
-            for (int i = 0; i < 23; i++) {
-                msg->iod_corr[i] = read_unsigned<uint8_t>(std::pair(M4_IOD_CORR.first + 18*i, M4_IOD_CORR.second));
-                msg->c0[i] = read_unsigned<uint16_t>(std::pair(M4_C0.first + 18*i, M4_C0.second));
-            }
-
-            d_content_update = true;
-            break;
-        }   
-
-        default: 
-            std::cout << "Unknow CNAV3 message type " << msg_type << std::endl;    
-        }    
-    } else {
-        std::cout << "CNAV3 message crc error" << std::endl;
+        out << "\n";
     }
+
+    out << "\n";
+
+    return out;
 }
+
+std::ostream & operator<<(std::ostream &out, const beidou_cnav3_navigation_message::message4_data data)
+{
+    out << boost::format("epoch time: %d  iod ssr: %d  iodp: %d  sub type: %d\n\t")
+        % data.epoch_time % uint32_t(data.iod_ssr) % uint32_t(data.iodp) % uint32_t(data.sub_type);
+
+    int cnt = 0;
+
+    for (int32_t i = 0; i < 23; i++) {
+        out << boost::format("(iod corr: %d  c0: %11.7f)\t") % uint32_t(data.iod_corr[i]) % data.c0[i];
+        if (++cnt == 5) {
+            cnt = 0;
+            out <<"\n\t";
+        }
+    }   
+
+    out << "\n"; 
+
+    return out;
+}
+

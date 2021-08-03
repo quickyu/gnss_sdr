@@ -1,12 +1,9 @@
 #ifndef GNSS_SDR_BEIDOU_CNAV3_NAVIGATION_MESSAGE_H
 #define GNSS_SDR_BEIDOU_CNAV3_NAVIGATION_MESSAGE_H
 
-#include "Beidou_B2b.h"
-#include "Beidou_CNAV3.h"
 #include <cstdint>
+#include <array>
 #include <string>
-#include <vector>
-#include <boost/dynamic_bitset.hpp>
 
 /** \addtogroup Core
  * \{ */
@@ -22,99 +19,73 @@ constexpr int CNAV3_MSG_2 = 2;
 constexpr int CNAV3_MSG_3 = 3;
 constexpr int CNAV3_MSG_4 = 4;
 
-struct cnav3_msg_type_1 {
-    uint32_t epoch_time;
-    uint8_t iod_ssr;
-    uint8_t iodp;
-    uint64_t bds_mask;
-    uint64_t gps_mask;
-    uint64_t gal_mask;
-    uint64_t glo_mask;
-};
-
-struct cnav3_msg_type_2 {
-    uint32_t epoch_time;
-    uint8_t iod_ssr;
-    uint16_t satslot[6];
-    uint16_t iodn[6];
-    uint8_t  iod_corr[6];
-    uint16_t radial[6];
-    uint16_t along[6];
-    uint16_t cross[6];
-    uint8_t ura_class[6];
-    uint8_t ura_val[6];
-};
-
-struct cnav3_msg_type_3 {
-    uint32_t epoch_time;
-    uint8_t iod_ssr;
-    uint8_t sat_num;
-    uint16_t sat_slot[31];
-    uint8_t code_bias_num[31];
-    uint8_t signal[31][15];
-    uint16_t code_bias[31][15];
-};
-
-struct cnav3_msg_type_4 {
-    uint32_t epoch_time;
-    uint8_t iod_ssr;
-    uint8_t iodp;
-    uint8_t sub_type;
-    uint8_t iod_corr[23];
-    uint16_t c0[23];
-};
-
-struct cnav3_message_content {
-    uint8_t msg_type{0};
-    uint8_t prn;
-    uint8_t ppp_status;
-    uint8_t data[2048];
-};
-
 class beidou_cnav3_navigation_message
 {
 public:
-    /*!
-     * Default constructor
-     */
-    beidou_cnav3_navigation_message();
+    class message1_data {
+    public:    
+        uint32_t epoch_time;
+        uint8_t iod_ssr;
+        uint8_t iodp;
+        uint64_t bds_mask;
+        uint64_t gps_mask;
+        uint64_t gal_mask;
+        uint64_t glo_mask;
+    };
+
+    class message2_data {
+    public:    
+        uint32_t epoch_time;
+        uint8_t iod_ssr;
+        std::array<uint16_t, 6> satslot;
+        std::array<uint16_t, 6> iodn;
+        std::array<uint8_t, 6> iod_corr;
+        std::array<double, 6> radial;
+        std::array<double, 6> along;
+        std::array<double, 6> cross;
+        std::array<uint8_t, 6> ura_class;
+        std::array<uint8_t, 6> ura_val;
+    };
+
+    class message3_data {
+    public:    
+        uint32_t epoch_time;
+        uint8_t iod_ssr;
+        uint8_t sat_num;
+        std::array<uint16_t, 31> sat_slot;
+        std::array<uint8_t, 31> code_bias_num;
+        std::array<std::array<uint8_t, 15>, 31> signal;
+        std::array<std::array<double, 15>, 31> code_bias;
+    };
+
+    class message4_data {
+    public:    
+        uint32_t epoch_time;
+        uint8_t iod_ssr;
+        uint8_t iodp;
+        uint8_t sub_type;
+        std::array<uint8_t, 23> iod_corr;
+        std::array<double, 23> c0;
+    };
+
+    beidou_cnav3_navigation_message() = default;
     ~beidou_cnav3_navigation_message() = default;
 
-    void frame_decode(std::string const &cnav_frames_str);
+    message1_data message1_decode(std::string const &frame);
+    message2_data message2_decode(std::string const &frame);
+    message3_data message3_decode(std::string const &frame);
+    message4_data message4_decode(std::string const &frame);
 
-    friend std::ostream& operator<<(std::ostream &, beidou_cnav3_navigation_message &);
-
-    inline bool get_flag_crc_test() const
-    {
-        return d_flag_crc_test;
-    }
-
-    inline bool get_update_flag() const 
-    {
-        return d_content_update;
-    }
-
-    inline struct cnav3_message_content & get_message()  
-    {
-        return d_content;
-    }
- 
 private:
-    bool crc_test(const std::vector<uint8_t> &bytes, uint32_t checksum) const;
-
     template<typename rv_type>
-    rv_type read_unsigned(const std::pair<int32_t, int32_t> &parameter);
-
-    boost::dynamic_bitset<uint8_t> m_data_field_bits;
-
-    bool d_flag_crc_test{false};
-    bool d_content_update{false};
-
-    uint32_t d_crc_error_counter{0};
-     
-    struct cnav3_message_content d_content;
+    rv_type read_unsigned(const std::string &data_bits, const std::pair<int32_t, int32_t> &parameter);  
 };
 
+std::ostream & operator<<(std::ostream &out, const beidou_cnav3_navigation_message::message1_data data);
+std::ostream & operator<<(std::ostream &out, const beidou_cnav3_navigation_message::message2_data data);
+std::ostream & operator<<(std::ostream &out, const beidou_cnav3_navigation_message::message3_data data);  
+std::ostream & operator<<(std::ostream &out, const beidou_cnav3_navigation_message::message4_data data);
+ 
 /** \} */
 /** \} */
 #endif  // GNSS_SDR_BEIDOU_CNAV3_NAVIGATION_MESSAGE_H

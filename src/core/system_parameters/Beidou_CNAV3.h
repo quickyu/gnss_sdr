@@ -7,11 +7,14 @@
 
 constexpr int32_t BEIDOU_CNAV3_PREAMBLE_SYMBOLS = 16;
 constexpr int32_t BEIDOU_CNAV3_TELEMETRY_MESSAGE_SYMBOLS = 1000;
-constexpr int32_t BEIDOU_CNAV3_DATA_FRAME_BITS = 462;
-constexpr int32_t BEIDOU_CNAV3_DATA_FRAME_BYTES = 58;
 constexpr char BEIDOU_CNAV3_PREAMBLE[17] = "1110101110010000";
 
-const std::pair<int32_t, int32_t> MSGTYPE{0, 6};
+constexpr int32_t BEIDOU_CNAV3_DATA_START_POS = 12;
+constexpr int32_t BEIDOU_CNAV3_DATA_LENGTH = 462;
+constexpr int32_t BEIDOU_CNAV3_CRC_START_POS = 474;
+constexpr int32_t BEIDOU_CNAV3_CRC_LENGTH = 24; 
+constexpr int32_t BEIDOU_CNAV3_FRAME_BITS = 498; 
+constexpr int32_t BEIDOU_CNAV3_DATA_BYTES = 58;
 
 const std::pair<int32_t, int32_t> M1_EPOCH{6, 17};
 const std::pair<int32_t, int32_t> M1_IODSSR{27, 2};
@@ -35,10 +38,10 @@ const std::pair<int32_t, int32_t> M2_URA_VAL{95, 3};
 const std::pair<int32_t, int32_t> M3_EPOCH{6, 17};
 const std::pair<int32_t, int32_t> M3_IODSSR{27, 2};
 const std::pair<int32_t, int32_t> M3_SATNUM{29, 5};
-const std::pair<int32_t, int32_t> M3_SATSLOT{34, 9};
-const std::pair<int32_t, int32_t> M3_CODEBIAS_NUM_OFF{9, 4};
-const std::pair<int32_t, int32_t> M3_SIGNAL_OFF{13, 4};
-const std::pair<int32_t, int32_t> M3_CODEBIAS_OFF{17, 12};
+constexpr int32_t M3_SATSLOT_LEN  = 9;
+constexpr int32_t M3_CODEBIAS_NUM_LEN = 4;
+constexpr int32_t M3_SIGNAL_LEN = 4;
+constexpr int32_t M3_CODEBIAS_LEN = 12;
 
 const std::pair<int32_t, int32_t> M4_EPOCH{6, 17};
 const std::pair<int32_t, int32_t> M4_IODSSR{27, 2};
