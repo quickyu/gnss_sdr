@@ -57,7 +57,7 @@ private:
    };
 
    static constexpr int bds_codes[16] = {
-      2, 30, 31, 0, 22, 23, 0, 25, 0, 0, 0, 0, 8, 0, 0, 0   // B1I B1CD B1CP __ B2AD B2AP __ B2BI __ __ __ __ B3I __ __ __
+      0, 9, 10, 0, 12, 13, 0, 6, 7, 0, 0, 0, 3, 0, 0, 0   // B1I B1CD B1CP __ B2AD B2AP __ B2BI __ __ __ __ B3I __ __ __
    };
 
    static constexpr int SYS_GPS = 1;
