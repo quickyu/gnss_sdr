@@ -222,6 +222,32 @@ int rtcm_ssr_encoder::encdoe_ssr3(bcnav3_type3 *p)
    return idx;
 }
 
+//ssr5 ura
+int rtcm_ssr_encoder::encode_ssr5(bcnav3_type2 *p)
+{
+   int nsat = 0;
+   for (int i = 0; i < 6; i++) {
+      if (p->satslot[i] > 0 && p->satslot[i] < 64)
+         nsat++;
+   }
+
+   if (nsat == 0)
+      return 0;
+
+   uint32_t tow = epoch_to_tow(p->epoch_time);
+
+   int idx = encode_ssr_head(5, SYS_BEIDOU, tow, nsat, _iodssr, 0, 0, 0);   
+
+   for (int i = 0; i < nsat; i++) {
+      setbitu(idx, 6, p->satslot[i]); 
+      idx += 6; 
+      setbitu(idx, 6, (p->ura_class[i] << 3) + p->ura_val[i]);
+      idx += 6;
+   }
+
+   return idx;
+}
+
 void rtcm_ssr_encoder::update_satellites_info(std::unique_ptr<bcnav3_message> &bcnav3_msg)
 {
    bcnav3_type1 *ptr = static_cast<bcnav3_type1 *>(bcnav3_msg.get());
@@ -242,30 +268,10 @@ void rtcm_ssr_encoder::update_satellites_info(std::unique_ptr<bcnav3_message> &b
    }
 }
 
-std::vector<uint8_t> rtcm_ssr_encoder::encode(std::unique_ptr<bcnav3_message> &bcnav3_msg)
+std::vector<uint8_t> rtcm_ssr_encoder::package_rtcm_frame(int nbits)
 {
-   LOG(INFO) << "rtcm encode : b-cnav3 type " << bcnav3_msg->msg_type << " epoch time " << bcnav3_msg->epoch_time;
-
-   if (static_cast<int>(bcnav3_msg->iod_ssr) != _iodssr) {
-      LOG(INFO) << "rtcm encode : iodssr mismatch current " << _iodssr << " input " << bcnav3_msg->iod_ssr;
+   if (nbits == 0)
       return {};
-   }   
-
-   int nbits = 0;
-
-   if (typeid(*bcnav3_msg) == typeid(bcnav3_type2)) {
-      nbits = encode_ssr1(static_cast<bcnav3_type2 *>(bcnav3_msg.get()));
-   } else if (typeid(*bcnav3_msg) == typeid(bcnav3_type3)) {
-      nbits = encdoe_ssr3(static_cast<bcnav3_type3 *>(bcnav3_msg.get()));
-   } else if(typeid(*bcnav3_msg) == typeid(bcnav3_type4)) {
-      nbits = encode_ssr2(static_cast<bcnav3_type4 *>(bcnav3_msg.get()));
-   }   
-
-   LOG(INFO) << "rtcm encode : encode return " << nbits << " bits";
-
-   if (nbits == 0) {
-      return {};
-   }   
 
    // rtcm header
    setbitu(0, 8, 0xd3); 
@@ -283,7 +289,7 @@ std::vector<uint8_t> rtcm_ssr_encoder::encode(std::unique_ptr<bcnav3_message> &b
    if (len >= 3+1024) 
       return {};
 
-   // message length without header and parity */
+   // message length without header and parity 
    setbitu(14, 10, len-3);
     
    // crc-24q
@@ -294,6 +300,45 @@ std::vector<uint8_t> rtcm_ssr_encoder::encode(std::unique_ptr<bcnav3_message> &b
    len += 3;
 
    return std::vector<uint8_t>(_rtcm_buf, _rtcm_buf+len);
+}
+
+std::vector<std::vector<uint8_t>> rtcm_ssr_encoder::encode(std::unique_ptr<bcnav3_message> &bcnav3_msg)
+{
+   LOG(INFO) << "rtcm encode : b-cnav3 type " << bcnav3_msg->msg_type << " epoch time " << bcnav3_msg->epoch_time;
+
+   if (static_cast<int>(bcnav3_msg->iod_ssr) != _iodssr) {
+      LOG(INFO) << "rtcm encode : iodssr mismatch current " << _iodssr << " input " << bcnav3_msg->iod_ssr;
+      return {};
+   }   
+
+   std::vector<std::vector<uint8_t>> frames;
+
+   if (typeid(*bcnav3_msg) == typeid(bcnav3_type2)) {
+      std::vector<uint8_t> frame;
+      int nbits;
+
+      nbits = encode_ssr1(static_cast<bcnav3_type2 *>(bcnav3_msg.get()));
+      frame = package_rtcm_frame(nbits);
+      if (frame.size())
+         frames.push_back(frame);
+
+      nbits = encode_ssr5(static_cast<bcnav3_type2 *>(bcnav3_msg.get()));
+      frame = package_rtcm_frame(nbits);
+      if (frame.size())
+         frames.push_back(frame);   
+   } else if (typeid(*bcnav3_msg) == typeid(bcnav3_type3)) {
+      int nbits = encdoe_ssr3(static_cast<bcnav3_type3 *>(bcnav3_msg.get()));
+      auto frame = package_rtcm_frame(nbits);
+      if (frame.size())
+         frames.push_back(frame);
+   } else if(typeid(*bcnav3_msg) == typeid(bcnav3_type4)) {
+      int nbits = encode_ssr2(static_cast<bcnav3_type4 *>(bcnav3_msg.get()));
+      auto frame = package_rtcm_frame(nbits);
+      if (frame.size())
+         frames.push_back(frame);
+   }   
+
+   return frames;
 }
 
 rtcm_ssr_sink_sptr make_rtcm_ssr_sink(int n_channels, int udp_port, std::string &udp_address, bool log_to_file)
@@ -417,17 +462,19 @@ int rtcm_ssr_sink::general_work(int noutput_items __attribute__((unused)), gr_ve
             if (typeid(*msg_data) == typeid(bcnav3_type1))
                rtcm_encoder.update_satellites_info(msg_data);
             else {  
-               std::vector<uint8_t> rtcm_data = rtcm_encoder.encode(msg_data);
-               if (rtcm_data.size() != 0) {
-                  std::string byte_array;
+               auto frames = rtcm_encoder.encode(msg_data);
+               if (frames.size() != 0) {
+                  for (auto frame : frames) {
+                     std::string byte_array;
 
-                  for (uint8_t b : rtcm_data) {
-                     byte_array += boost::str(boost::format("%02x ") % static_cast<uint32_t>(b));
+                     for (uint8_t b : frame) {
+                        byte_array += boost::str(boost::format("%02x ") % static_cast<uint32_t>(b));
+                     }
+
+                     LOG(INFO) << "rtcm message: " << byte_array;
+
+                     udp_socket.send_to(buffer(frame.data(), frame.size()), remote_endpoint);
                   }
-
-                  LOG(INFO) << "rtcm message: " << byte_array;
-
-                  udp_socket.send_to(buffer(rtcm_data.data(), rtcm_data.size()), remote_endpoint);
                }
             }      
          }

@@ -78,6 +78,8 @@ private:
    int encode_ssr1(bcnav3_type2 *p);
    int encode_ssr2(bcnav3_type4 *p);
    int encdoe_ssr3(bcnav3_type3 *p);
+   int encode_ssr5(bcnav3_type2 *p);
+   std::vector<uint8_t> package_rtcm_frame(int nbits);
    uint32_t epoch_to_tow(uint32_t epoch_time);
 
 public:
@@ -88,7 +90,7 @@ public:
    }
 
    void update_satellites_info(std::unique_ptr<bcnav3_message> &bcnav3_msg);
-   std::vector<uint8_t> encode(std::unique_ptr<bcnav3_message> &bcnav3_msg);
+   std::vector<std::vector<uint8_t>> encode(std::unique_ptr<bcnav3_message> &bcnav3_msg);
 };
 
 class rtcm_ssr_sink : public gr::block {
