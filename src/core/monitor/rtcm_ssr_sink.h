@@ -80,7 +80,7 @@ private:
    int encdoe_ssr3(bcnav3_type3 *p);
    int encode_ssr5(bcnav3_type2 *p);
    std::vector<uint8_t> package_rtcm_frame(int nbits);
-   uint32_t epoch_to_tow(uint32_t epoch_time);
+   int epoch_to_tow(int epoch_time);
 
 public:
    rtcm_ssr_encoder()
@@ -104,8 +104,8 @@ private:
    friend rtcm_ssr_sink_sptr make_rtcm_ssr_sink(int n_channels, int udp_port, std::string &udp_address, bool log_to_file);
 
    rtcm_ssr_sink(int n_channels, int udp_port, std::string &udp_address, bool log_to_file);
-   time_t epoch_to_bdst(uint32_t epoch_time);
-   std::string epoch_to_str(uint32_t epoch_time);
+   time_t epoch_to_bdst(int epoch_time);
+   std::string epoch_to_str(int epoch_time);
 
    int d_udp_port;
    int d_nchannels;

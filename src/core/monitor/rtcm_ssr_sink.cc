@@ -84,16 +84,25 @@ int rtcm_ssr_encoder::encode_ssr_head(int type, int sys, int tow, int nsat, int 
    return i;
 }
 
-uint32_t rtcm_ssr_encoder::epoch_to_tow(uint32_t epoch_time)
+int rtcm_ssr_encoder::epoch_to_tow(int epoch_time)
 {
-   time_t curr_utc;
-   time(&curr_utc);
-   curr_utc += 4;  //utc to bdst
+   time_t local_time;
+   time(&local_time);
+   local_time += 4;  //utc to bdst
 
    struct tm ptm;
-   gmtime_r(&curr_utc, &ptm);
-     
-   return ptm.tm_wday*3600*24 + epoch_time;
+   gmtime_r(&local_time, &ptm);
+
+   int local_tod = ptm.tm_hour*3600 + ptm.tm_min*60 + ptm.tm_sec;
+
+   int wday = ptm.tm_wday; 
+   if (epoch_time - local_tod > 43200) {
+      wday = ptm.tm_wday - 1;
+      if (wday < 0)
+         wday = 6;
+   }
+ 
+   return wday*3600*24 + epoch_time;
 }
 
 //ssr1 orbit corrections
@@ -399,15 +408,22 @@ void rtcm_ssr_sink::forecast(int noutput_items __attribute__((unused)), gr_vecto
    }
 }
 
-time_t rtcm_ssr_sink::epoch_to_bdst(uint32_t epoch_time)
+time_t rtcm_ssr_sink::epoch_to_bdst(int epoch_time)
 {
-   time_t curr_utc;
-   time(&curr_utc);
-   curr_utc += 4;
+   time_t local_time;
+   time(&local_time);
+   local_time += 4;   //utc to bdst
 
    struct tm ptm;
-   gmtime_r(&curr_utc, &ptm);
+   gmtime_r(&local_time, &ptm);
 
+   int local_tod = ptm.tm_hour*3600 + ptm.tm_min*60 + ptm.tm_sec;
+
+   if (epoch_time - local_tod > 43200) {
+      local_time -= 3600*24;
+   }   
+
+   gmtime_r(&local_time, &ptm);
    ptm.tm_hour = 0;
    ptm.tm_min = 0;
    ptm.tm_sec = 0;
@@ -415,7 +431,7 @@ time_t rtcm_ssr_sink::epoch_to_bdst(uint32_t epoch_time)
    return mktime(&ptm) + epoch_time;
 }
 
-std::string rtcm_ssr_sink::epoch_to_str(uint32_t epoch_time)
+std::string rtcm_ssr_sink::epoch_to_str(int epoch_time)
 {
    time_t bdst = epoch_to_bdst(epoch_time);
 
