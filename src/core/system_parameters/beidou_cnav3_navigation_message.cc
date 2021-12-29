@@ -159,6 +159,41 @@ std::ostream & operator<<(std::ostream &out, std::unique_ptr<bcnav3_message> &da
             "gps mask: %016x  gal mask: %016x  glo mask: %016x\n")
             % ptr->epoch_time % ptr->iod_ssr % ptr->iodp % ptr->bds_mask 
             % ptr->gps_mask % ptr->gal_mask % ptr->glo_mask;
+
+        std::vector<uint8_t> sat_index;
+
+        uint64_t mask = 0x4000000000000000;
+        for (int i = 1; i <= 63; i++) {
+            if (ptr->bds_mask & mask) {
+                sat_index.push_back(i);
+            }    
+            mask >>= 1;   
+        }
+
+        mask = 0x0000001000000000;  
+        for (int i = 64; i <= 100; i++) {
+            if (ptr->gps_mask & mask) {
+                sat_index.push_back(i);
+            }
+            mask >>= 1;   
+        }    
+
+        int cnt = 0;
+        for (uint8_t idx : sat_index) {
+            std::string sys = idx < 64 ? "C" : "G";
+            if (idx > 63) {
+                idx -= 63;
+            }
+
+            out << boost::format("%s%02d ") % sys % static_cast<int>(idx);
+
+            if (++cnt == 23) {
+                cnt = 0;
+                out << "\n";
+            }
+        }  
+
+        out << "\n";  
     } else if (typeid(*data) == typeid(bcnav3_type2)) {
         bcnav3_type2 *ptr = static_cast<bcnav3_type2 *>(data.get());
 
@@ -207,7 +242,7 @@ std::ostream & operator<<(std::ostream &out, std::unique_ptr<bcnav3_message> &da
             out << boost::format("(iod corr: %d  c0: %11.7f)\t") % static_cast<uint32_t>(ptr->iod_corr[i]) % ptr->c0[i];
             if (++cnt == 5) {
                 cnt = 0;
-                out <<"\n\t";
+                out << "\n\t";
             }
         }   
 

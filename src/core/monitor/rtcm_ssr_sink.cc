@@ -84,11 +84,19 @@ int rtcm_ssr_encoder::encode_ssr_head(int type, int sys, int tow, int nsat, int 
    return i;
 }
 
-int rtcm_ssr_encoder::epoch_to_tow(int epoch_time)
+int rtcm_ssr_encoder::epoch_to_tow(int epoch_time, int sys)
 {
    time_t local_time;
    time(&local_time);
-   local_time += 4;  //utc to bdst
+
+   if (sys == SYS_BEIDOU)
+      local_time += 4;  //utc to bdst
+   else {
+      local_time += 18; //utc to gpst  
+      epoch_time += 14;  //bdst to gpst
+      if (epoch_time > 86400)
+         epoch_time -= 86400;
+   }   
 
    struct tm ptm;
    gmtime_r(&local_time, &ptm);
@@ -105,35 +113,63 @@ int rtcm_ssr_encoder::epoch_to_tow(int epoch_time)
    return wday*3600*24 + epoch_time;
 }
 
-//ssr1 orbit corrections
-int rtcm_ssr_encoder::encode_ssr1(bcnav3_type2 *p)
+void rtcm_ssr_encoder::scan_satslot(bcnav3_type2 *p, int min, int max, int &num_of_sat, int &offset)
 {
-   int nsat = 0;
+   num_of_sat = 0;
+   offset = -1;
+
    for (int i = 0; i < 6; i++) {
-      if (p->satslot[i] > 0 && p->satslot[i] < 64)
-         nsat++;
+      if (p->satslot[i] >= min && p->satslot[i] <= max) {
+         if (offset == -1) {
+            offset = i;
+         }   
+         num_of_sat++;
+      }   
    }
+}
+
+//ssr1 orbit corrections
+int rtcm_ssr_encoder::encode_ssr1(bcnav3_type2 *p, int sys)
+{
+   int nsat, off, ni, nj;
+ 
+   if (sys == SYS_BEIDOU) {
+      scan_satslot(p, 1, 63, nsat, off);
+      ni = 10;
+      nj = 8;
+   } else if (sys == SYS_GPS) {
+      scan_satslot(p, 64, 100, nsat, off);
+      ni = 8;
+      nj = 0;
+   } else 
+      return 0;
 
    if (nsat == 0)
       return 0;
 
-   uint32_t tow = epoch_to_tow(p->epoch_time);
+   uint32_t tow = epoch_to_tow(p->epoch_time, sys);
 
-   int idx = encode_ssr_head(1, SYS_BEIDOU, tow, nsat, _iodssr, 0, 0, 0);   
-
-   int ni = 10, nj = 8;
+   int idx = encode_ssr_head(1, sys, tow, nsat, _iodssr, 0, 0, 0);   
 
    for (int i = 0; i < nsat; i++) {
-      int radial = ROUND(p->radial[i]/1E-4);
-      int along = ROUND(p->along[i]/4E-4);
-      int cross = ROUND(p->cross[i]/4E-4);
-            
-      setbitu(idx, 6, p->satslot[i]); 
+      int radial = ROUND(p->radial[off+i]/1E-4);
+      int along = ROUND(p->along[off+i]/4E-4);
+      int cross = ROUND(p->cross[off+i]/4E-4);
+
+      int prn = sys == SYS_BEIDOU ? p->satslot[off+i] : p->satslot[off+i] - 63;     
+      setbitu(idx, 6, prn); 
       idx += 6; 
-      setbitu(idx, ni, 0); //toe
-      idx += ni; 
-      setbitu(idx, nj, p->iodn[i]); //iodn
-      idx += nj; 
+
+      if (sys == SYS_BEIDOU) {
+         setbitu(idx, ni, 0); //toe
+         idx += ni; 
+         setbitu(idx, nj, p->iodn[off+i]); //iodn
+         idx += nj; 
+      } else {
+         setbitu(idx, ni, p->iodn[off+i]); 
+         idx += ni; 
+      }  
+
       setbits(idx, 22, radial); //delta radial
       idx += 22; 
       setbits(idx, 20, along); //delta along-track 
@@ -147,14 +183,14 @@ int rtcm_ssr_encoder::encode_ssr1(bcnav3_type2 *p)
       setbits(idx, 19, 0); //dot delta cross-track 
       idx += 19; 
 
-      _iodcorr[p->satslot[i]-1] = p->iod_corr[i];
+      _iodcorr[p->satslot[off+i]-1] = p->iod_corr[off+i];
    }
 
    return idx;
 }
 
 //ssr2 clock corrections
-int rtcm_ssr_encoder::encode_ssr2(bcnav3_type4 *p)
+int rtcm_ssr_encoder::encode_ssr2(bcnav3_type4 *p, int sys)
 {
    if (static_cast<int>(p->iodp) != _iodp)
       return 0;
@@ -167,8 +203,14 @@ int rtcm_ssr_encoder::encode_ssr2(bcnav3_type4 *p)
 
    for (int i = 0; i < 23 && static_cast<std::size_t>(spos+i) < _valid_sats.size(); i++) {
       int prn = _valid_sats[spos+i];
+      if (sys == SYS_BEIDOU && prn > 63)
+         continue;
+      if (sys == SYS_GPS && prn < 64)
+         continue;   
       if (p->iod_corr[i] == _iodcorr[prn-1]) {
          int c0 = ROUND(p->c0[i]/1E-4);
+         if (sys == SYS_GPS)
+            prn -= 63;
          clk_bias.push_back({prn, c0});
       }
    }   
@@ -177,9 +219,9 @@ int rtcm_ssr_encoder::encode_ssr2(bcnav3_type4 *p)
    if (nsat == 0)
       return 0;
 
-   uint32_t tow = epoch_to_tow(p->epoch_time);
+   uint32_t tow = epoch_to_tow(p->epoch_time, sys);
 
-   int idx = encode_ssr_head(2, SYS_BEIDOU, tow, nsat, _iodssr, 0, 0, 0);   
+   int idx = encode_ssr_head(2, sys, tow, nsat, _iodssr, 0, 0, 0);   
 
    for (int i = 0; i < nsat; i++) {
       setbitu(idx, 6, clk_bias[i][0]); //satellite ID 
@@ -196,15 +238,15 @@ int rtcm_ssr_encoder::encode_ssr2(bcnav3_type4 *p)
 }
 
 //ssr3 satellite code biases
-int rtcm_ssr_encoder::encdoe_ssr3(bcnav3_type3 *p)
+int rtcm_ssr_encoder::encdoe_ssr3(bcnav3_type3 *p, int sys)
 {
    int nsat = p->sat_num;
    if (nsat == 0 || nsat > 31)
       return 0;
 
-   uint32_t tow = epoch_to_tow(p->epoch_time);
+   uint32_t tow = epoch_to_tow(p->epoch_time, sys);
 
-   int idx = encode_ssr_head(3, SYS_BEIDOU, tow, nsat, _iodssr, 0, 0, 0);
+   int idx = encode_ssr_head(3, sys, tow, nsat, _iodssr, 0, 0, 0);
 
    for (int i = 0; i < nsat; i++) {
       setbitu(idx, 6, p->satslot[i]); // satellite ID 
@@ -232,25 +274,29 @@ int rtcm_ssr_encoder::encdoe_ssr3(bcnav3_type3 *p)
 }
 
 //ssr5 ura
-int rtcm_ssr_encoder::encode_ssr5(bcnav3_type2 *p)
+int rtcm_ssr_encoder::encode_ssr5(bcnav3_type2 *p, int sys)
 {
-   int nsat = 0;
-   for (int i = 0; i < 6; i++) {
-      if (p->satslot[i] > 0 && p->satslot[i] < 64)
-         nsat++;
-   }
-
+   int nsat, off;
+ 
+   if (sys == SYS_BEIDOU) {
+      scan_satslot(p, 1, 63, nsat, off);
+   } else if (sys == SYS_GPS) {
+      scan_satslot(p, 64, 100, nsat, off);
+   } else 
+      return 0;
+      
    if (nsat == 0)
       return 0;
 
-   uint32_t tow = epoch_to_tow(p->epoch_time);
+   uint32_t tow = epoch_to_tow(p->epoch_time, sys);
 
-   int idx = encode_ssr_head(5, SYS_BEIDOU, tow, nsat, _iodssr, 0, 0, 0);   
+   int idx = encode_ssr_head(5, sys, tow, nsat, _iodssr, 0, 0, 0);   
 
    for (int i = 0; i < nsat; i++) {
-      setbitu(idx, 6, p->satslot[i]); 
+      int prn = sys == SYS_BEIDOU ? p->satslot[off+i] : p->satslot[off+i] - 63;
+      setbitu(idx, 6, prn); 
       idx += 6; 
-      setbitu(idx, 6, (p->ura_class[i] << 3) + p->ura_val[i]);
+      setbitu(idx, 6, (p->ura_class[off+i] << 3) + p->ura_val[off+i]);
       idx += 6;
    }
 
@@ -267,13 +313,21 @@ void rtcm_ssr_encoder::update_satellites_info(std::unique_ptr<bcnav3_message> &b
       _iodp = ptr->iodp;
       _valid_sats.clear();
 
-      uint64_t mask = 0x8000000000000000;
-
-      for (int i = 0; i < 64; i++) {
-         if (ptr->bds_mask & mask)
+      uint64_t mask = 0x4000000000000000;
+      for (int i = 1; i <= 63; i++) {
+         if (ptr->bds_mask & mask) {
             _valid_sats.push_back(i);
+         }    
          mask >>= 1;   
       }
+
+      mask = 0x0000001000000000;  
+      for (int i = 64; i <= 100; i++) {
+         if (ptr->gps_mask & mask) {
+            _valid_sats.push_back(i);
+         }
+         mask >>= 1;   
+      }    
    }
 }
 
@@ -326,25 +380,43 @@ std::vector<std::vector<uint8_t>> rtcm_ssr_encoder::encode(std::unique_ptr<bcnav
       std::vector<uint8_t> frame;
       int nbits;
 
-      nbits = encode_ssr1(static_cast<bcnav3_type2 *>(bcnav3_msg.get()));
+      nbits = encode_ssr1(static_cast<bcnav3_type2 *>(bcnav3_msg.get()), SYS_BEIDOU);
       frame = package_rtcm_frame(nbits);
       if (frame.size())
          frames.push_back(frame);
 
-      nbits = encode_ssr5(static_cast<bcnav3_type2 *>(bcnav3_msg.get()));
+      nbits = encode_ssr1(static_cast<bcnav3_type2 *>(bcnav3_msg.get()), SYS_GPS);
       frame = package_rtcm_frame(nbits);
       if (frame.size())
          frames.push_back(frame);   
+
+      nbits = encode_ssr5(static_cast<bcnav3_type2 *>(bcnav3_msg.get()), SYS_BEIDOU);
+      frame = package_rtcm_frame(nbits);
+      if (frame.size())
+         frames.push_back(frame);   
+
+      nbits = encode_ssr5(static_cast<bcnav3_type2 *>(bcnav3_msg.get()), SYS_GPS);
+      frame = package_rtcm_frame(nbits);
+      if (frame.size())
+         frames.push_back(frame);    
    } else if (typeid(*bcnav3_msg) == typeid(bcnav3_type3)) {
-      int nbits = encdoe_ssr3(static_cast<bcnav3_type3 *>(bcnav3_msg.get()));
+      int nbits = encdoe_ssr3(static_cast<bcnav3_type3 *>(bcnav3_msg.get()), SYS_BEIDOU);
       auto frame = package_rtcm_frame(nbits);
       if (frame.size())
          frames.push_back(frame);
    } else if(typeid(*bcnav3_msg) == typeid(bcnav3_type4)) {
-      int nbits = encode_ssr2(static_cast<bcnav3_type4 *>(bcnav3_msg.get()));
-      auto frame = package_rtcm_frame(nbits);
+      int nbits;
+      std::vector<uint8_t> frame;
+
+      nbits = encode_ssr2(static_cast<bcnav3_type4 *>(bcnav3_msg.get()), SYS_BEIDOU);
+      frame = package_rtcm_frame(nbits);
       if (frame.size())
          frames.push_back(frame);
+
+      nbits = encode_ssr2(static_cast<bcnav3_type4 *>(bcnav3_msg.get()), SYS_GPS);
+      frame = package_rtcm_frame(nbits);
+      if (frame.size())
+         frames.push_back(frame);   
    }   
 
    return frames;

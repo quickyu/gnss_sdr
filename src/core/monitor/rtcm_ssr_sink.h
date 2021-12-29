@@ -68,19 +68,20 @@ private:
    uint8_t _rtcm_buf[buf_len];
 
    std::vector<uint8_t> _valid_sats;
-   std::array<int, 63> _iodcorr;
+   std::array<int, 100> _iodcorr;
    int _iodp, _iodssr;
 
    uint32_t crc24q(int length);
    void setbitu(int pos, int len, uint32_t data);
    void setbits(int pos, int len, int32_t data);
    int encode_ssr_head(int type, int sys, int tow, int nsat, int iod_ssr, int refd, int provid, int solid);
-   int encode_ssr1(bcnav3_type2 *p);
-   int encode_ssr2(bcnav3_type4 *p);
-   int encdoe_ssr3(bcnav3_type3 *p);
-   int encode_ssr5(bcnav3_type2 *p);
+   int encode_ssr1(bcnav3_type2 *p, int sys);
+   int encode_ssr2(bcnav3_type4 *p, int sys);
+   int encdoe_ssr3(bcnav3_type3 *p, int sys);
+   int encode_ssr5(bcnav3_type2 *p, int sys);
    std::vector<uint8_t> package_rtcm_frame(int nbits);
-   int epoch_to_tow(int epoch_time);
+   int epoch_to_tow(int epoch_time, int sys);
+   void scan_satslot(bcnav3_type2 *p, int min, int max, int &num_of_sat, int &offset);
 
 public:
    rtcm_ssr_encoder()
